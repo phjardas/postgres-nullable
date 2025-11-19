@@ -1,0 +1,20 @@
+{
+  "name": "@phjardas/postgres-nullable",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.10"
+  },
+  "volta": {
+    "node": "24.11.1"
+  }
+}
