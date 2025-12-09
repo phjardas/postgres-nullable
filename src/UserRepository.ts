@@ -1,56 +1,90 @@
 import { DatabaseClient } from "./DatabaseClient.js";
 import type { User } from "./UserService.js";
 
+export type Page<T> = {
+  readonly items: readonly T[];
+  readonly totalCount: number;
+};
+
+export type UserRepositoryNull = {
+  readonly findById?: { readonly [id: string]: User };
+  readonly searchByName?: { readonly [name: string]: Page<User> };
+};
+
 export class UserRepository {
+  readonly #table: string;
   readonly #sql: DatabaseClient;
 
   constructor({
-    sql = DatabaseClient.create(),
-  }: { sql?: DatabaseClient } = {}) {
+    table,
+    sql,
+  }: {
+    readonly table: string;
+    readonly sql: DatabaseClient;
+  }) {
+    this.#table = table;
     this.#sql = sql;
   }
 
-  static createNull({
-    users = [],
-  }: { users?: readonly User[] } = {}): UserRepository {
+  static create() {
     return new UserRepository({
+      table: "users",
+      sql: DatabaseClient.create(),
+    });
+  }
+
+  static createNull({
+    findById,
+    searchByName,
+  }: UserRepositoryNull = {}): UserRepository {
+    const table = "users";
+
+    return new UserRepository({
+      table,
       sql: DatabaseClient.createNull({
-        queries: users.flatMap((user) => [
-          {
-            query: "SELECT * FROM users WHERE id = $1 LIMIT 1",
-            parameters: [user.id],
-            result: { rows: [user] },
-          },
-        ]),
+        findById: { [table]: findById ?? {} },
+        search: {
+          [table]: Object.entries(searchByName ?? {}).map(([name, result]) => ({
+            spec: {
+              where: [{ textSearch: { columns: ["name"], value: name } }],
+              order: [{ column: "id", direction: "asc" }],
+            },
+            result: result.items,
+          })),
+        },
+        count: {
+          [table]: Object.entries(searchByName ?? {}).map(([name, result]) => ({
+            where: [{ textSearch: { columns: ["name"], value: name } }],
+            result: result.totalCount,
+          })),
+        },
       }),
     });
   }
 
   async findById(id: string): Promise<User | undefined> {
-    return this.#sql.findById<User>("users", id);
+    return this.#sql.findById<User>(this.#table, id);
   }
 
-  async searchByName(name: string): Promise<readonly User[]> {
-    // FIXME implement
-    throw new Error("Not implemented");
-    // return this.#sql<
-    //   readonly User[]
-    // >`select id, name from ${this.#sql("users")} where name ilike ${`%${name}%`} order by id`;
+  async searchByName(name: string): Promise<Page<User>> {
+    const [items, totalCount] = await Promise.all([
+      this.#sql.search<User>(this.#table, {
+        where: [{ textSearch: { columns: ["name"], value: name } }],
+        order: [{ column: "id", direction: "asc" }],
+      }),
+      this.#sql.count<User>(this.#table),
+    ]);
+
+    return { items, totalCount };
   }
 
   async save(user: User): Promise<void> {
-    // FIXME implement
-    throw new Error("Not implemented");
-    // await this.#sql<
-    //   readonly User[]
-    // >`insert into ${this.#sql("users")} (id, name) values (${user.id}, ${user.name}) on conflict (id) do update set name = ${user.name}`;
+    await this.#sql.save(this.#table, user);
   }
 
   async deleteById(id: string): Promise<void> {
-    // FIXME implement
-    throw new Error("Not implemented");
-    // await this.#sql<
-    //   readonly User[]
-    // >`delete from ${this.#sql("users")} where id = ${id}`;
+    await this.#sql.delete(this.#table, {
+      where: [{ eq: { column: "id", value: id } }],
+    });
   }
 }

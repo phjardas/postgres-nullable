@@ -7,17 +7,12 @@ describe("UserRepository", () => {
   it("findById", async () => {
     const user: User = { id: "1", name: "John Doe" };
 
-    const sql = DatabaseClient.createNull({
-      queries: [
-        {
-          query: "SELECT * FROM users WHERE id = $1 LIMIT 1",
-          params: [user.id],
-          result: { rows: [user] },
-        },
-      ],
+    const repo = new UserRepository({
+      table: "users",
+      sql: DatabaseClient.createNull({
+        findById: { users: { [user.id]: user } },
+      }),
     });
-
-    const repo = new UserRepository({ sql });
 
     await expect(repo.findById("1")).resolves.toEqual(user);
   });

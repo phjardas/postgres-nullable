@@ -5,7 +5,7 @@ import { UserService } from "./UserService.js";
 describe("UserService", () => {
   it("getUserById", async () => {
     const repo = UserRepository.createNull({
-      users: [{ id: "1", name: "John Doe" }],
+      findById: { "1": { id: "1", name: "John Doe" } },
     });
 
     const service = new UserService({ repo });

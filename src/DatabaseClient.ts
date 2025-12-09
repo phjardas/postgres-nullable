@@ -73,6 +73,37 @@ type DatabaseClientEvents = {
       readonly update: Partial<any>;
     },
   ];
+
+  deleted: [
+    {
+      readonly where?: readonly Predicate<any>[];
+    },
+  ];
+};
+
+export type DatabaseClientNull = {
+  readonly findById?: {
+    readonly [table: string]: { [id: string]: any | undefined };
+  };
+  readonly findOne?: {
+    readonly [table: string]: readonly {
+      readonly where: readonly Predicate<any>[];
+      readonly result?: unknown;
+    }[];
+  };
+  readonly search?: {
+    readonly [table: string]: readonly {
+      readonly spec: SearchSpec<any>;
+      readonly result: readonly unknown[];
+    }[];
+  };
+  readonly count?: {
+    readonly [table: string]: readonly {
+      readonly where: readonly Predicate<any>[];
+      readonly result: number;
+    }[];
+  };
+  readonly logger?: Logger;
 };
 
 export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
@@ -99,13 +130,67 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
   }
 
   static createNull({
-    queries,
+    findById,
+    findOne,
+    search,
+    count,
     logger,
-  }: {
-    queries?: readonly StubbedQuery[];
-    logger?: Logger;
-  } = {}): DatabaseClient {
-    return new DatabaseClient({ pool: new PoolStub({ queries }), logger });
+  }: DatabaseClientNull = {}): DatabaseClient {
+    return new DatabaseClient({
+      pool: new PoolStub({
+        queries: [
+          ...Object.entries(findById ?? {}).flatMap(([table, records]) =>
+            Object.entries(records).map(
+              ([id, record]) =>
+                ({
+                  ...DatabaseClient.findByIdQuery<any>(table, id),
+                  result: { rows: record ? [record] : [] },
+                }) satisfies StubbedQuery
+            )
+          ),
+          ...Object.entries(findOne ?? {}).flatMap(([table, records]) =>
+            records.map(
+              ({ where, result }) =>
+                ({
+                  ...DatabaseClient.findOneQuery<any>(table, where),
+                  result: { rows: result ? [result] : [] },
+                }) satisfies StubbedQuery
+            )
+          ),
+          ...Object.entries(search ?? {}).flatMap(([table, records]) =>
+            records.map(
+              ({ spec, result }) =>
+                ({
+                  ...DatabaseClient.searchQuery<any>(table, spec),
+                  result: { rows: result },
+                }) satisfies StubbedQuery
+            )
+          ),
+          ...Object.entries(count ?? {}).flatMap(([table, records]) =>
+            records.map(
+              ({ where, result }) =>
+                ({
+                  ...DatabaseClient.countQuery<any>(table, where),
+                  result: { rows: [{ cnt: result }] },
+                }) satisfies StubbedQuery
+            )
+          ),
+        ],
+      }),
+      logger,
+    });
+  }
+
+  private static findByIdQuery<
+    T extends { id: string; [key: string]: unknown },
+  >(
+    table: string,
+    id: string
+  ): {
+    readonly query: string;
+    readonly params: unknown[];
+  } {
+    return this.findOneQuery<T>(table, [{ eq: { column: "id", value: id } }]);
   }
 
   async findById<T extends { id: string; [key: string]: unknown }>(
@@ -115,10 +200,13 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
     return this.findOne<T>(table, [{ eq: { column: "id", value: id } }]);
   }
 
-  async findOne<T extends { id: string; [key: string]: unknown }>(
+  private static findOneQuery<T extends { [key: string]: unknown }>(
     table: string,
     where?: readonly Predicate<T>[]
-  ): Promise<T | undefined> {
+  ): {
+    readonly query: string;
+    readonly params: unknown[];
+  } {
     const parameters = new Parameters();
     const predicates: string[] = (where ?? []).map((predicate) =>
       applyPredicate(predicate, parameters)
@@ -132,14 +220,25 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
 
     query += ` LIMIT 1`;
 
-    const { rows } = await this.#query<T>(query, parameters.parameters);
+    return { query, params: parameters.parameters };
+  }
+
+  async findOne<T extends { [key: string]: unknown }>(
+    table: string,
+    where?: readonly Predicate<T>[]
+  ): Promise<T | undefined> {
+    const { query, params } = DatabaseClient.findOneQuery<T>(table, where);
+    const { rows } = await this.#query<T>(query, params);
     return rows[0];
   }
 
-  async search<T extends { [key: string]: unknown }>(
+  private static searchQuery<T extends { [key: string]: unknown }>(
     table: string,
     spec: SearchSpec<T> = {}
-  ): Promise<readonly T[]> {
+  ): {
+    readonly query: string;
+    readonly params: unknown[];
+  } {
     const parameters = new Parameters();
     const predicates = (spec.where ?? []).map((predicate) =>
       applyPredicate(predicate, parameters)
@@ -166,14 +265,25 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
       query += ` LIMIT ${parameters.param(spec.limit)}`;
     }
 
-    const { rows } = await this.#query<T>(query, parameters.parameters);
+    return { query, params: parameters.parameters };
+  }
+
+  async search<T extends { [key: string]: unknown }>(
+    table: string,
+    spec: SearchSpec<T> = {}
+  ): Promise<readonly T[]> {
+    const { query, params } = DatabaseClient.searchQuery<T>(table, spec);
+    const { rows } = await this.#query<T>(query, params);
     return rows;
   }
 
-  async count<T extends { [key: string]: unknown }>(
+  private static countQuery<T extends { [key: string]: unknown }>(
     table: string,
     where: readonly Predicate<T>[] = []
-  ): Promise<number> {
+  ): {
+    readonly query: string;
+    readonly params: unknown[];
+  } {
     const parameters = new Parameters();
     const predicates = where.map((predicate) =>
       applyPredicate(predicate, parameters)
@@ -182,11 +292,15 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
     let query = `SELECT COUNT(*) AS cnt FROM ${table}`;
     if (predicates.length) query += ` WHERE ${predicates.join(" AND ")}`;
 
-    const { rows } = await this.#query<{ readonly cnt: number }>(
-      query,
-      parameters.parameters
-    );
+    return { query, params: parameters.parameters };
+  }
 
+  async count<T extends { [key: string]: unknown }>(
+    table: string,
+    where: readonly Predicate<T>[] = []
+  ): Promise<number> {
+    const { query, params } = DatabaseClient.countQuery<T>(table, where);
+    const { rows } = await this.#query<{ readonly cnt: number }>(query, params);
     return rows[0]?.cnt ?? 0;
   }
 
@@ -236,6 +350,23 @@ export class DatabaseClient extends EventEmitter<DatabaseClientEvents> {
     this.emit("updated", { where, update });
   }
 
+  async delete<T extends { [key: string]: unknown }>(
+    table: string,
+    { where }: { readonly where?: readonly Predicate<T>[] }
+  ): Promise<void> {
+    const parameters = new Parameters();
+    const predicates = (where ?? []).map((predicate) =>
+      applyPredicate(predicate, parameters)
+    );
+
+    let query = `DELETE FROM ${table}`;
+    if (predicates.length) query += ` WHERE ${predicates.join(" AND ")}`;
+
+    await this.#query(query, parameters.parameters);
+
+    this.emit("deleted", { where });
+  }
+
   async #query<T>(query: string, params?: unknown[]): Promise<QueryResult<T>> {
     this.#logger?.debug({ query, params }, "SQL query");
     return this.#pool.query(query, params);
@@ -279,7 +410,7 @@ function applyPredicate<T extends { [key: string]: unknown }>(
   throw new Error(`Unsupported predicate: ${JSON.stringify(predicate)}`);
 }
 
-export type StubbedQuery<T = unknown> = {
+type StubbedQuery<T = unknown> = {
   readonly query: string;
   readonly params?: readonly unknown[];
   readonly result: QueryResult<T>;

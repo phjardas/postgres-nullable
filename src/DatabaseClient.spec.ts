@@ -186,13 +186,7 @@ describe("DatabaseClient", () => {
 
       it("should return the expected result for a stubbed query", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query: "SELECT * FROM table WHERE id = $1 LIMIT 1",
-              params: ["id"],
-              result: { rows: [{ id: "id", value: "test" }] },
-            },
-          ],
+          findById: { table: { id: { id: "id", value: "test" } } },
         });
         const result = await client.findById("table", "id");
         expect(result).toEqual({ id: "id", value: "test" });
@@ -208,14 +202,19 @@ describe("DatabaseClient", () => {
 
       it("should return the expected result for a stubbed query", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query:
-                "SELECT * FROM table WHERE id = $1 ORDER BY id ASC OFFSET $2 LIMIT $3",
-              params: ["id", 0, 1],
-              result: { rows: [{ id: "id", value: "test" }] },
-            },
-          ],
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [{ eq: { column: "id", value: "id" } }],
+                  order: [{ column: "id", direction: "asc" }],
+                  offset: 0,
+                  limit: 1,
+                },
+                result: [{ id: "id", value: "test" }],
+              },
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -230,13 +229,23 @@ describe("DatabaseClient", () => {
 
       it("should support 'in' predicate", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query: "SELECT * FROM table WHERE status IN ($1, $2, $3)",
-              params: ["active", "pending", "completed"],
-              result: { rows: [{ id: "1", status: "active" }] },
-            },
-          ],
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    {
+                      in: {
+                        column: "status",
+                        values: ["active", "pending", "completed"],
+                      },
+                    },
+                  ],
+                },
+                result: [{ id: "1", status: "active" }],
+              },
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -255,13 +264,23 @@ describe("DatabaseClient", () => {
 
       it("should support 'notIn' predicate", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query: "SELECT * FROM table WHERE status NOT IN ($1, $2)",
-              params: ["deleted", "archived"],
-              result: { rows: [{ id: "1", status: "active" }] },
-            },
-          ],
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    {
+                      notIn: {
+                        column: "status",
+                        values: ["deleted", "archived"],
+                      },
+                    },
+                  ],
+                },
+                result: [{ id: "1", status: "active" }],
+              },
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -275,13 +294,18 @@ describe("DatabaseClient", () => {
 
       it("should support 'arrayContains' predicate", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query: "SELECT * FROM table WHERE $1 = ANY(tags)",
-              params: ["important"],
-              result: { rows: [{ id: "1", tags: ["important", "urgent"] }] },
-            },
-          ],
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    { arrayContains: { column: "tags", value: "important" } },
+                  ],
+                },
+                result: [{ id: "1", tags: ["important", "urgent"] }],
+              },
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -293,13 +317,17 @@ describe("DatabaseClient", () => {
 
       it("should support multiple predicates combined", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query:
-                "SELECT * FROM table WHERE status = $1 AND category IN ($2, $3) AND $4 = ANY(tags)",
-              params: ["active", "news", "blog", "featured"],
-              result: {
-                rows: [
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    { eq: { column: "status", value: "active" } },
+                    { in: { column: "category", values: ["news", "blog"] } },
+                    { arrayContains: { column: "tags", value: "featured" } },
+                  ],
+                },
+                result: [
                   {
                     id: "1",
                     status: "active",
@@ -308,8 +336,8 @@ describe("DatabaseClient", () => {
                   },
                 ],
               },
-            },
-          ],
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -327,18 +355,25 @@ describe("DatabaseClient", () => {
 
       it("should support 'textSearch' predicate across multiple columns", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query:
-                "SELECT * FROM table WHERE (name ILIKE $1 OR description ILIKE $1)",
-              params: ["%smith%"],
-              result: {
-                rows: [
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    {
+                      textSearch: {
+                        columns: ["name", "description"],
+                        value: "smith",
+                      },
+                    },
+                  ],
+                },
+                result: [
                   { id: "1", name: "John Smith", description: "Developer" },
                 ],
               },
-            },
-          ],
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -359,13 +394,23 @@ describe("DatabaseClient", () => {
 
       it("should support 'textSearch' predicate with single column", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query: "SELECT * FROM table WHERE email ILIKE $1",
-              params: ["%@example.com%"],
-              result: { rows: [{ id: "1", email: "user@example.com" }] },
-            },
-          ],
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    {
+                      textSearch: {
+                        columns: ["email"],
+                        value: "@example.com",
+                      },
+                    },
+                  ],
+                },
+                result: [{ id: "1", email: "user@example.com" }],
+              },
+            ],
+          },
         });
 
         const result = await client.search("table", {
@@ -384,13 +429,21 @@ describe("DatabaseClient", () => {
 
       it("should combine 'textSearch' with other predicates", async () => {
         const client = DatabaseClient.createNull({
-          queries: [
-            {
-              query:
-                "SELECT * FROM table WHERE status = $1 AND (name ILIKE $2 OR email ILIKE $2)",
-              params: ["active", "%john%"],
-              result: {
-                rows: [
+          search: {
+            table: [
+              {
+                spec: {
+                  where: [
+                    { eq: { column: "status", value: "active" } },
+                    {
+                      textSearch: {
+                        columns: ["name", "email"],
+                        value: "john",
+                      },
+                    },
+                  ],
+                },
+                result: [
                   {
                     id: "1",
                     name: "John Doe",
@@ -399,8 +452,8 @@ describe("DatabaseClient", () => {
                   },
                 ],
               },
-            },
-          ],
+            ],
+          },
         });
 
         const result = await client.search("table", {
